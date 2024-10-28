@@ -4,6 +4,7 @@ from tabulate import tabulate
 import io
 import copy
 import re
+from PyPDF2 import PdfReader
 # Azure imports
 from azure.core.credentials import AzureKeyCredential
 from azure.ai.documentintelligence import DocumentIntelligenceClient 
@@ -45,14 +46,24 @@ class DocuLayout():
 
     #document intelligence functions
     def doc_intelligence(document) -> AnalyzeResult:
+        pdf_reader = PdfReader(io.BytesIO(document))
+        num_pages = pdf_reader._get_num_pages()
+        all_results = []
+
+        for start_page in range(1, num_pages, 2):
+            end_page = min(start_page + 2, num_pages)
         
-        poller = document_intelligence_client.begin_analyze_document(
-        "prebuilt-layout", 
-        analyze_request = document, 
-        content_type = "application/pdf", 
-        output_content_format = "markdown")
-        result: AnalyzeResult = poller.result()
-        return result
+            poller = document_intelligence_client.begin_analyze_document(
+                "prebuilt-layout", 
+                analyze_request=document, 
+                content_type="application/pdf", 
+                output_content_format="markdown",
+                pages = f"{start_page} - {end_page}" if end_page != num_pages else f"{start_page}"
+            )
+            result: AnalyzeResult = poller.result()
+            all_results.append(result)
+    
+        return all_results
 
     # Get tables from document processed with document intelligence 
     def get_table(result: AnalyzeResult):
@@ -76,9 +87,10 @@ class DocuLayout():
         return tables
 
     # Format intial dict
-    def format_dict(name: str, url: str):
+    def format_dict(name: str, url: str,):
         
         new_name = name.split(".")[0]
+        new_name = new_name.replace(" ", "_")
         result_dict ={
             
             "id": new_name,
@@ -88,47 +100,35 @@ class DocuLayout():
         return result_dict
 
     # pages and document dict
-    def pages_tables_dict(first_dict: dict, result: AnalyzeResult, tables: list):
+    def pages_dict(first_dict: dict, result: AnalyzeResult, index: int):
         
-        doc_pages = []
-        doc_tables = []
-
-        if result.tables:
-            for t, tabs in enumerate(result.tables):
-                for page in tabs.bounding_regions:
-                    table_dict = {
-                        'id': f'{first_dict["id"]}_{page.page_number}',
-                        'pageNumber': page.page_number,
-                        'table': tables[0][t]
-                    }
-                    doc_tables.append(table_dict)
-
+        page_index = index + 1
+        page_index = page_index*2-1 # we are always passing two pages so to get first is 
+        doc_pages = []         # index * 2 - 1. Then increment by one for second page. 
+        
         for page in result.pages:
+            
             lines=[]
             for line in page.lines:
                 lines.append(line.content)
 
             page_dict = {
-                'id': f'{first_dict["id"]}_{page.page_number}',
+                'id': f'{first_dict["id"]}_{page_index}',
                 'parent': first_dict["parent"],
                 'pageNumber': page.page_number,
                 'url': first_dict["url"],
-                'tables': [],
                 'content': ' '.join(lines)
             }
-
-            for tabs in doc_tables:
-                if tabs['pageNumber'] == page.page_number:
-                    page_dict['tables'].append(tabs['table'])
             doc_pages.append(page_dict)
             
-        return doc_pages
+            page_index += 1
 
+            
+        return doc_pages
     # create documents to send for AI search and tables to merge. 
     def prep_to_send(doc_pages: list):
         
         docs_to_send = []
-        tables_to_merge = []
         
         for page in doc_pages:
             metadata = {
@@ -141,10 +141,4 @@ class DocuLayout():
             doc.metadata = metadata
             docs_to_send.append(doc)
             
-            tabs = {
-                "id": page['id'],            
-                'tables': page['tables']
-            }
-            tables_to_merge.append(tabs)
-
-        return docs_to_send, tables_to_merge
+        return docs_to_send
