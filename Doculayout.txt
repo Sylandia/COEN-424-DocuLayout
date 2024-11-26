@@ -1,0 +1,9 @@
+python-dotenv
+PyPDF2
+azure-core
+azure-ai-documentintelligence
+azure-storage-blob
+azure-search-documents
+langchain
+langchain-core
+langchain-openai

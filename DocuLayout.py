@@ -39,13 +39,48 @@ class DocuLayout():
     
     def __init__(self, *args, **kwargs):
         
-        self.document_intelligence_client = None
-        self.blob_service_client = None
-        self.search_client = None
-        self.index_name
+        # Load environment variables
+        load_dotenv()
+        os.environ["AZURE_OPENAI_ENDPOINT"] = os.getenv("OPENAI_ENDPOINT")
+        os.environ["AZURE_OPENAI_API_KEY"] = os.getenv("OPENAI_KEY")
+        doc_intelligence_endpoint = os.getenv("DOC_INTELLIGENCE_ENDPOINT")
+        doc_intelligence_key = os.getenv("DOC_INTELLIGENCE_KEY")
+        blob_connection_string = os.getenv("BLOB_STORAGE_CONNECTION_STRING")
+        storage_account_key = os.getenv("STORAGE_ACCOUNT_KEY")
+        search_endpoint: str = os.getenv("AI_SEARCH_ENDPOINT")
+        search_admin_key: str = os.getenv("AI_SEARCH_KEY")
+        index_name: str = os.getenv("INDEX_NAME").lower() #keep lowercase and in the format of "container_name-index"
+        container_name = index_name.split("-index")[0]
+      
+
+        # Connect to search service 
+        
+        self.document_intelligence_client = DocumentIntelligenceClient(endpoint= doc_intelligence_endpoint, credential=AzureKeyCredential(doc_intelligence_key))
+        self.blob_service_client = BlobServiceClient.from_connection_string(blob_connection_string)
+        self.search_client = SearchClient(endpoint = search_endpoint, index_name = index_name, credential = AzureKeyCredential(search_admin_key))
+        blob_client = self.blob_service_client.get_container_client(f"container_name")
+        if not blob_client.exists():
+            blob_client.create_container()
+            print("Created")
+        self.list_blobs = blob_client
+        self.index_name = index_name
+
+    def dot_env_load(self):
+        
+        load_dotenv()
+        os.environ["AZURE_OPENAI_ENDPOINT"] = os.getenv("OPENAI_ENDPOINT")
+        os.environ["AZURE_OPENAI_API_KEY"] = os.getenv("OPENAI_KEY")
+        self.doc_intelligence_endpoint = os.getenv("DOC_INTELLIGENCE_ENDPOINT")
+        self.doc_intelligence_key = os.getenv("DOC_INTELLIGENCE_KEY")
+        self.blob_connection_string = os.getenv("BLOB_STORAGE_CONNECTION_STRING")
+        self.storage_account_key = os.getenv("STORAGE_ACCOUNT_KEY")
+        self.search_endpoint: str = os.getenv("AI_SEARCH_ENDPOINT")
+        self.search_admin_key: str = os.getenv("AI_SEARCH_KEY")
+        self.index_name: str = os.getenv("INDEX_NAME")
+
 
     #document intelligence functions
-    def doc_intelligence(document) -> AnalyzeResult:
+    def doc_intelligence(self,document) -> AnalyzeResult:
         pdf_reader = PdfReader(io.BytesIO(document))
         num_pages = pdf_reader._get_num_pages()
         all_results = []
@@ -53,7 +88,7 @@ class DocuLayout():
         for start_page in range(1, num_pages, 2):
             end_page = min(start_page + 2, num_pages)
         
-            poller = document_intelligence_client.begin_analyze_document(
+            poller = self.document_intelligence_client.begin_analyze_document(
                 "prebuilt-layout", 
                 analyze_request=document, 
                 content_type="application/pdf", 
@@ -64,27 +99,6 @@ class DocuLayout():
             all_results.append(result)
     
         return all_results
-
-    # Get tables from document processed with document intelligence 
-    def get_table(result: AnalyzeResult):
-        tables = []
-        table_formated = []
-        if result.tables:
-            for table in result.tables:
-                table_data = []
-                headers = []
-                
-                for cell in table.cells:
-                    if cell.row_index == 0:
-                        headers.append(cell.content)
-                    else:
-                        if len(table_data) < cell.row_index:
-                            table_data.append([])
-                        table_data[cell.row_index-1].append(cell.content)
-                
-                table_formated.append(tabulate(table_data, headers=headers, tablefmt="simple")) ## store tables for storage
-            tables.append(table_formated)
-        return tables
 
     # Format intial dict
     def format_dict(name: str, url: str,):
